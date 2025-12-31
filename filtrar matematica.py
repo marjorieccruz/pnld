@@ -39,11 +39,14 @@ def processar_arquivo(arquivo, tipo_escola):
         todas_planilhas = pd.read_excel(arquivo, sheet_name=None)
         
         for nome_aba, df in todas_planilhas.items():
-            df.columns = df.columns.str.strip()
+            # Converter nomes das colunas para string e limpar espaços
+            df.columns = [str(c).strip() for c in df.columns]
             col_comp = [c for c in df.columns if "COMPONENTE" in c.upper()]
             
             if col_comp:
-                df_filt = df[df[col_comp[0]].astype(str).str.contains(filtro, case=False, na=False)]
+                # Converter coluna para string antes de filtrar
+                coluna = df[col_comp[0]].fillna("").astype(str)
+                df_filt = df[coluna.str.contains(filtro, case=False, na=False)]
                 
                 if len(df_filt) > 0:
                     df_filt = df_filt.copy()
@@ -83,12 +86,19 @@ for tipo, padrao in TIPOS_ESCOLA.items():
     if todos_dados:
         df_tipo = pd.concat(todos_dados, ignore_index=True)
         
-        # Salvar arquivo do tipo
-        arquivo_saida = os.path.join(caminho, f"MATEMATICA_{tipo}.xlsx")
-        df_tipo.to_excel(arquivo_saida, index=False)
+        # Se tiver mais de 1 milhão de linhas, salvar como CSV
+        if len(df_tipo) > 1000000:
+            arquivo_saida = os.path.join(caminho, f"MATEMATICA_{tipo}.csv")
+            df_tipo.to_csv(arquivo_saida, index=False, encoding='utf-8-sig')
+            formato = "CSV"
+        else:
+            arquivo_saida = os.path.join(caminho, f"MATEMATICA_{tipo}.xlsx")
+            df_tipo.to_excel(arquivo_saida, index=False)
+            formato = "XLSX"
+        
         arquivos_gerados.append((tipo, arquivo_saida, len(df_tipo)))
         
-        print(f"\n✓ Salvo: MATEMATICA_{tipo}.xlsx ({len(df_tipo):,} registros)")
+        print(f"\n✓ Salvo: MATEMATICA_{tipo}.{formato.lower()} ({len(df_tipo):,} registros)")
 
 # ------------------------------------------------------------
 # RESUMO FINAL
