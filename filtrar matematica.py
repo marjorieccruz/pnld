@@ -20,7 +20,7 @@ filtro = "matem"
 TIPOS_ESCOLA = {
     "ESTADUAIS": "*ESTADUAIS*.xlsx",
     "FEDERAIS": "*FEDERAIS*.xlsx", 
-    "MUNICIPAIS": "*MUNICIPAIS*.xlsm",
+    "MUNICIPAIS": "*MUNICIPAIS*.xlsx",
 }
 
 # ------------------------------------------------------------
