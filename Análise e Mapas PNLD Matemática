@@ -1,0 +1,240 @@
+# ============================================================
+# Script R - Análise e Mapas PNLD Matemática
+# Gera mapas do Brasil por ano (2020-2024)
+# ============================================================
+
+# Instalar pacotes se necessário
+pacotes <- c("openxlsx", "dplyr", "ggplot2", "geobr", "sf", "stringr", "scales")
+for (p in pacotes) {
+  if (!requireNamespace(p, quietly = TRUE)) {
+    install.packages(p, repos = "https://cloud.r-project.org")
+  }
+}
+
+library(openxlsx)
+library(dplyr)
+library(ggplot2)
+library(geobr)
+library(sf)
+library(stringr)
+library(scales)
+
+# ------------------------------------------------------------
+# CONFIGURAÇÃO
+# ------------------------------------------------------------
+
+# Altere para o caminho onde estão os arquivos compilados
+caminho <- "/caminho/para/sua/pasta/PNLD"
+
+# ------------------------------------------------------------
+# 1. CARREGAR DADOS
+# ------------------------------------------------------------
+
+cat("Carregando dados...\n")
+
+# Carregar arquivos compilados
+df_estaduais <- read.xlsx(file.path(caminho, "MATEMATICA_ESTADUAIS.xlsx"))
+df_federais <- read.xlsx(file.path(caminho, "MATEMATICA_FEDERAIS.xlsx"))
+
+# Municipais é CSV (muito grande para Excel)
+df_municipais <- read.csv(file.path(caminho, "MATEMATICA_MUNICIPAIS.csv"), 
+                          stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+
+# Combinar todos os dados
+df_todos <- bind_rows(
+  df_estaduais,
+  df_federais,
+  df_municipais
+)
+
+cat("Total de registros:", format(nrow(df_todos), big.mark = ","), "\n")
+
+# ------------------------------------------------------------
+# 2. PREPARAR DADOS PARA O MAPA
+# ------------------------------------------------------------
+
+# Encontrar coluna de quantidade de livros
+col_qte <- names(df_todos)[str_detect(toupper(names(df_todos)), "QTE.*LIVRO|QTE.LIVRO")]
+if (length(col_qte) > 0) {
+  names(df_todos)[names(df_todos) == col_qte[1]] <- "QTE_LIVRO"
+}
+
+# Converter para numérico
+df_todos$QTE_LIVRO <- as.numeric(df_todos$QTE_LIVRO)
+df_todos$ANO <- as.numeric(df_todos$ANO)
+
+# Agregar por UF e ANO
+df_resumo <- df_todos %>%
+  filter(!is.na(UF) & !is.na(ANO)) %>%
+  group_by(UF, ANO) %>%
+  summarise(
+    total_livros = sum(QTE_LIVRO, na.rm = TRUE),
+    total_registros = n(),
+    .groups = "drop"
+  )
+
+cat("\nResumo por UF e ANO:\n")
+print(df_resumo %>% group_by(ANO) %>% summarise(total = sum(total_livros)))
+
+# ------------------------------------------------------------
+# 3. CARREGAR MAPA DO BRASIL
+# ------------------------------------------------------------
+
+cat("\nCarregando mapa do Brasil...\n")
+
+# Baixar shapefile dos estados brasileiros
+mapa_brasil <- read_state(code_state = "all", year = 2020, showProgress = FALSE)
+
+# Simplificar geometria para melhor performance
+mapa_brasil <- mapa_brasil %>%
+  select(abbrev_state, name_state, geom) %>%
+  rename(UF = abbrev_state)
+
+# ------------------------------------------------------------
+# 4. GERAR MAPAS POR ANO
+# ------------------------------------------------------------
+
+cat("\nGerando mapas...\n")
+
+# Anos disponíveis
+anos <- sort(unique(df_resumo$ANO))
+
+# Paleta de cores
+cores <- scale_fill_gradient(
+  low = "#fee8c8", 
+  high = "#b30000",
+  labels = label_number(scale = 1e-6, suffix = "M"),
+  na.value = "grey90"
+)
+
+# Criar pasta para salvar mapas
+dir_mapas <- file.path(caminho, "mapas")
+if (!dir.exists(dir_mapas)) dir.create(dir_mapas)
+
+# Gerar um mapa para cada ano
+for (ano in anos) {
+  cat("  Gerando mapa", ano, "...\n")
+  
+  # Filtrar dados do ano
+  dados_ano <- df_resumo %>% filter(ANO == ano)
+  
+  # Juntar com mapa
+  mapa_ano <- mapa_brasil %>%
+    left_join(dados_ano, by = "UF")
+  
+  # Criar mapa
+  p <- ggplot(mapa_ano) +
+    geom_sf(aes(fill = total_livros), color = "white", size = 0.3) +
+    scale_fill_gradient(
+      low = "#fee8c8", 
+      high = "#b30000",
+      labels = label_number(scale = 1e-6, suffix = "M"),
+      na.value = "grey90",
+      name = "Livros"
+    ) +
+    labs(
+      title = paste("Distribuição de Livros de Matemática -", ano),
+      subtitle = "PNLD - Escolas Estaduais, Federais e Municipais",
+      caption = "Fonte: FNDE/PNLD"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey40"),
+      plot.caption = element_text(size = 9, color = "grey50"),
+      legend.position = "right",
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      panel.grid = element_blank()
+    )
+  
+  # Salvar mapa
+  arquivo_mapa <- file.path(dir_mapas, paste0("mapa_matematica_", ano, ".png"))
+  ggsave(arquivo_mapa, p, width = 10, height = 10, dpi = 300)
+  
+  cat("    Salvo:", arquivo_mapa, "\n")
+}
+
+# ------------------------------------------------------------
+# 5. MAPA COMPARATIVO (TODOS OS ANOS)
+# ------------------------------------------------------------
+
+cat("\nGerando mapa comparativo...\n")
+
+# Preparar dados para facet
+mapa_todos_anos <- mapa_brasil %>%
+  cross_join(data.frame(ANO = anos)) %>%
+  left_join(df_resumo, by = c("UF", "ANO"))
+
+# Criar mapa com facetas
+p_comparativo <- ggplot(mapa_todos_anos) +
+  geom_sf(aes(fill = total_livros), color = "white", size = 0.2) +
+  scale_fill_gradient(
+    low = "#fee8c8", 
+    high = "#b30000",
+    labels = label_number(scale = 1e-6, suffix = "M"),
+    na.value = "grey90",
+    name = "Livros"
+  ) +
+  facet_wrap(~ANO, ncol = 3) +
+  labs(
+    title = "Evolução da Distribuição de Livros de Matemática (2020-2024)",
+    subtitle = "PNLD - Escolas Estaduais, Federais e Municipais",
+    caption = "Fonte: FNDE/PNLD"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey40"),
+    plot.caption = element_text(size = 9, color = "grey50"),
+    legend.position = "bottom",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 12, face = "bold")
+  )
+
+# Salvar mapa comparativo
+arquivo_comparativo <- file.path(dir_mapas, "mapa_matematica_comparativo.png")
+ggsave(arquivo_comparativo, p_comparativo, width = 14, height = 12, dpi = 300)
+
+cat("  Salvo:", arquivo_comparativo, "\n")
+
+# ------------------------------------------------------------
+# 6. RESUMO FINAL
+# ------------------------------------------------------------
+
+cat("\n", strrep("=", 50), "\n", sep = "")
+cat("CONCLUÍDO!\n")
+cat(strrep("=", 50), "\n")
+cat("\nMapas gerados em:", dir_mapas, "\n")
+cat("\nArquivos criados:\n")
+for (ano in anos) {
+  cat("  - mapa_matematica_", ano, ".png\n", sep = "")
+}
+cat("  - mapa_matematica_comparativo.png\n")
+
+# ------------------------------------------------------------
+# 7. TABELA RESUMO
+# ------------------------------------------------------------
+
+cat("\n=== RESUMO POR ANO ===\n")
+resumo_ano <- df_resumo %>%
+  group_by(ANO) %>%
+  summarise(
+    total_livros = sum(total_livros),
+    total_registros = sum(total_registros)
+  ) %>%
+  mutate(total_livros_fmt = format(total_livros, big.mark = ","))
+
+print(resumo_ano)
+
+cat("\n=== TOP 5 UFs POR ANO ===\n")
+for (ano in anos) {
+  cat("\n", ano, ":\n", sep = "")
+  top5 <- df_resumo %>%
+    filter(ANO == ano) %>%
+    arrange(desc(total_livros)) %>%
+    head(5)
+  print(top5)
+}
