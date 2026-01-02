@@ -24,7 +24,7 @@ library(scales)
 # ------------------------------------------------------------
 
 # Altere para o caminho onde estão os arquivos compilados
-caminho <- "/caminho/para/sua/pasta/PNLD"
+caminho <- "/caminho/para/sua/pasta/Dados Compilados_Matematica"
 
 # ------------------------------------------------------------
 # 1. CARREGAR DADOS
@@ -32,13 +32,22 @@ caminho <- "/caminho/para/sua/pasta/PNLD"
 
 cat("Carregando dados...\n")
 
-# Carregar arquivos compilados
-df_estaduais <- read.xlsx(file.path(caminho, "MATEMATICA_ESTADUAIS.xlsx"))
+# Carregar arquivos compilados (ajuste os formatos conforme necessário)
+# ESTADUAIS - CSV
+df_estaduais <- read.csv(file.path(caminho, "MATEMATICA_ESTADUAIS.csv"), 
+                         stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+
+# FEDERAIS - XLSX
 df_federais <- read.xlsx(file.path(caminho, "MATEMATICA_FEDERAIS.xlsx"))
 
-# Municipais é CSV (muito grande para Excel)
+# MUNICIPAIS - CSV
 df_municipais <- read.csv(file.path(caminho, "MATEMATICA_MUNICIPAIS.csv"), 
                           stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+
+# Converter todas as colunas para character (evita conflitos de tipo)
+df_estaduais <- df_estaduais %>% mutate(across(everything(), as.character))
+df_federais <- df_federais %>% mutate(across(everything(), as.character))
+df_municipais <- df_municipais %>% mutate(across(everything(), as.character))
 
 # Combinar todos os dados
 df_todos <- bind_rows(
